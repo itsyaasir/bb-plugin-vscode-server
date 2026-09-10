@@ -1,9 +1,42 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import type * as NodeFsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { describe, expect, it, vi } from "vitest";
 import plugin, { discoverAndStoreServerUrl, discoverServerUrl, importLocalProfile, withWorkspaceFolder } from "./server";
+
+// Configuring a loopback URL makes the plugin copy the desktop VS Code profile
+// and extensions into the code-server directories, and `isDirectory` passes
+// whenever those directories exist on the machine running the suite. Left real,
+// a test that reaches this path performs a multi-hundred-megabyte copy: slow
+// enough to blow the 5s timeout, and it overwrites the code-server profile of
+// whoever runs it. Copies between the suite's temp directories stay real, so the
+// import tests still exercise a genuine copy.
+const copiedProfilePaths = vi.hoisted(() => [] as Array<{ source: string; destination: string }>);
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeFsPromises>();
+  const home = process.env.HOME ?? "";
+  // Names the directories that belong to the developer rather than the suite.
+  const touchesRealProfile = (path: string) => {
+    const value = String(path);
+    return (
+      value.startsWith(`${home}/.local/share/code-server`) ||
+      value.startsWith(`${home}/Library/Application Support/Code`) ||
+      value.startsWith(`${home}/.vscode`)
+    );
+  };
+  return {
+    ...actual,
+    cp: vi.fn(async (source: string, destination: string, options?: object) => {
+      if (touchesRealProfile(source) || touchesRealProfile(destination)) {
+        copiedProfilePaths.push({ source: String(source), destination: String(destination) });
+        return;
+      }
+      return actual.cp(source, destination, options);
+    }),
+  };
+});
 
 describe("VS Code Server configuration", () => {
   it("normalizes a configured server URL before exposing it to the panel", async () => {
@@ -118,6 +151,7 @@ describe("VS Code Server configuration", () => {
 
     try {
       await plugin(bb);
+      copiedProfilePaths.length = 0;
       await expect(
         harness.behavior.callRpc("discover_vscode_server_url", { threadId: null }),
       ).resolves.toMatchObject({
@@ -129,6 +163,18 @@ describe("VS Code Server configuration", () => {
           targetExtensionsDirectory: expect.stringMatching(/\.local\/share\/code-server\/extensions$/),
         },
       });
+      // The point of restoring the paths first: the import that follows has to
+      // use the restored directories, not the empty ones the settings held.
+      expect(copiedProfilePaths).toEqual([
+        {
+          source: expect.stringMatching(/Code\/User$/),
+          destination: expect.stringMatching(/\.local\/share\/code-server\/User$/),
+        },
+        {
+          source: expect.stringMatching(/\.vscode\/extensions$/),
+          destination: expect.stringMatching(/\.local\/share\/code-server\/extensions$/),
+        },
+      ]);
     } finally {
       vi.unstubAllGlobals();
     }
