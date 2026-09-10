@@ -1,11 +1,11 @@
 {
   "sdkMajor": 0,
-  "sdkVersion": "0.4.35",
+  "sdkVersion": "0.4.53",
   "artifactFormatVersion": 1,
   "pluginId": "vscode-server",
-  "pluginVersion": "0.1.17",
+  "pluginVersion": "0.1.18",
   "builtWith": {
-    "bbVersion": "0.41.0",
-    "pluginSdkVersion": "0.4.35"
+    "bbVersion": "0.42.1",
+    "pluginSdkVersion": "0.4.53"
   }
 }

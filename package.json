@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-vscode-server",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "type": "module",
   "description": "Embeds a configured code-server or VS Code Server instance in BB right-panel tabs.",
   "license": "MIT",
@@ -18,7 +18,7 @@
   },
   "bb": {
     "name": "VS Code Server",
-    "description": "Embeds a configured VS Code server in BB side panels.",
+    "description": "Embeds a self-hosted code-server or VS Code Server in a thread's right panel, opened at that thread's workspace, with optional desktop profile and extension import.",
     "branding": {
       "icon": "./assets/vscode.svg"
     },
