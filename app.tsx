@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { definePluginApp, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "./server";
+import { editorSessions } from "./lib/editor-sessions";
+import { RetainedEditor } from "./retained-editor";
 
 type ProfileImportStatus = {
   sourceUserDataDirectory: string;
@@ -51,8 +53,17 @@ function VsCodeServerContent({ threadId }: { threadId: string | null }) {
   }, [rpc, threadId]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    rpc.call("vscode_server_url", { threadId }).then(
+      ({ url, profile }) => {
+        if (!cancelled) setState(url === null ? { kind: "missing" } : { kind: "ready", url, profile });
+      },
+      (cause) => {
+        if (!cancelled) setState({ kind: "error", message: cause instanceof Error ? cause.message : String(cause) });
+      },
+    );
+    return () => { cancelled = true; };
+  }, [rpc, threadId]);
 
   if (state.kind === "ready") {
     return (
@@ -89,13 +100,7 @@ function VsCodeServerContent({ threadId }: { threadId: string | null }) {
             </div>
           ) : null}
         </div>
-        <iframe
-          title="VS Code Server"
-          src={state.url}
-          className="min-h-0 flex-1 border-0 bg-background"
-          allow="clipboard-read; clipboard-write; fullscreen"
-          referrerPolicy="no-referrer"
-        />
+        <RetainedEditor scope={threadId ?? "new-thread"} url={state.url} />
       </div>
     );
   }
@@ -139,7 +144,7 @@ function VsCodeServerContent({ threadId }: { threadId: string | null }) {
 }
 
 function ThreadVsCodeServerPanel({ threadId }: { threadId: string }) {
-  return <VsCodeServerContent threadId={threadId} />;
+  return <VsCodeServerContent key={threadId} threadId={threadId} />;
 }
 
 function NewThreadVsCodeServerPanel() {
@@ -147,9 +152,16 @@ function NewThreadVsCodeServerPanel() {
 }
 
 export default definePluginApp((app) => {
-  app.slots.threadPanelAction({
+  app.contentScripts.register({
+    id: "retained-editor-sessions",
+    mount: () => editorSessions.start(document),
+  });
+  app.slots.experimental_tab({
+    context: { kind: "thread" },
+    availability: "action",
     id: "vscode-server",
     title: "VS Code",
+    icon: "Code",
     component: ThreadVsCodeServerPanel,
     layout: "flush",
     run: ({ openPanel, threadId }) => {

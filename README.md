@@ -32,6 +32,33 @@ The plugin settings also show the desktop VS Code profile and extension director
 
 In any thread, open the right panel, choose **Open new tab**, then select **VS Code**. A thread has one VS Code panel; reopening it focuses that panel. The panel opens code-server at the thread environment’s workspace; threads without an environment open at their BB thread-storage folder. Its compact header expands when clicked to reveal the server URL, profile import status, and **Open in Browser**. It reloads its configuration when opened; use **Reload configuration** after changing the setting while it is already open. In the plugin settings, turn on **Capture local server** to restore the standard VS Code profile paths, then detect code-server or VS Code Server on ports 8080 and 8000 and save the first healthy endpoint. Turn the switch off to clear every plugin setting. Turn it back on to restore the paths and capture again. When no URL is configured, **Detect local server** in the panel performs the same capture. **Open in Browser** delegates the URL to BB's native Browser, whose tabs remain available across thread navigation.
 
+## Editor session retention
+
+VS Code stays loaded when switching to another right-panel tab, hiding the
+panel, or navigating to another thread. The plugin keeps the iframe connected
+in a hidden container and uses `Element.moveBefore()` to restore it without
+reloading its document. Separate thread/workspace URLs retain separate sessions;
+concurrent panes do not move the editor out of another active pane.
+
+Closing an editor tab releases its iframe. Disabling or reloading the plugin
+releases all retained frames. **Reload editor** explicitly starts a fresh
+session after confirmation. A full app-window/page reload still ends the
+in-memory sessions; code-server's own persistence is unchanged.
+
+This requires a browser supporting `Element.moveBefore()`. Verified with
+bb 0.47.1, Electron 44, and Chromium 152. The SDK has no tab-close lifecycle
+callback, so cleanup tracks the owning panel's current tab-pill close control;
+this integration should be rechecked after bb changes its tab UI.
+
+Validation: `npx vitest run`, `npx tsc --noEmit`, and `bb plugin build`.
+The browser check used a signed-in code-server workbench with an unsaved
+untitled draft. Info/Browser tab switches, panel hiding, and a round trip
+between two workspaces preserved the original iframe and draft with zero
+additional loads. Closing one workspace tab released only its iframe, and
+plugin reload released all previous frames. The unit tests cover ownership,
+workspace isolation, stale route bindings, explicit/keyboard tab close, and
+idempotent teardown; jsdom does not model iframe document preservation.
+
 ## Development
 
 ```sh
