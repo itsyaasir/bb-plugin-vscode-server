@@ -39,6 +39,90 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 describe("VS Code Server configuration", () => {
+  it.each([
+    ["host_m4", "http://127.0.0.1:8000"],
+    ["host_devbox", "https://devbox.example.ts.net:8443"],
+  ])("routes an identical workspace path to the editor for %s", async (hostId, serverUrl) => {
+    const workspacePath = "/Users/yasirdev/Dev/Consultancy/shipzen";
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "vscode-server",
+      settings: {
+        serverUrl: "http://127.0.0.1:8000",
+        machineServerUrls: JSON.stringify({
+          host_m4: "http://127.0.0.1:8000",
+          host_devbox: "https://devbox.example.ts.net:8443",
+        }),
+      },
+      sdk: {
+        threads: { get: async () => ({ environmentId: "env_project" }) },
+        environments: { get: async () => ({ hostId, path: workspacePath }) },
+      },
+    });
+    await plugin(bb);
+    await expect(harness.behavior.callRpc("vscode_server_url", { threadId: "thread_project" }))
+      .resolves.toMatchObject({ url: withWorkspaceFolder(serverUrl, workspacePath), profile: null });
+  });
+
+  it("does not fall back to the local editor for an unmapped machine", async () => {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "vscode-server",
+      settings: {
+        serverUrl: "http://127.0.0.1:8000",
+        machineServerUrls: JSON.stringify({ host_m4: "http://127.0.0.1:8000" }),
+      },
+      sdk: {
+        threads: { get: async () => ({ environmentId: "env_remote" }) },
+        environments: { get: async () => ({ hostId: "host_remote", path: "/work/project" }) },
+      },
+    });
+    await plugin(bb);
+    await expect(harness.behavior.callRpc("vscode_server_url", { threadId: "thread_remote" }))
+      .rejects.toThrow(/No editor URL configured for machine host_remote/);
+  });
+
+  it("uses the thread-storage machine when a thread has no environment", async () => {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "vscode-server",
+      settings: { machineServerUrls: JSON.stringify({ host_devbox: "https://devbox.example.ts.net:8443" }) },
+      sdk: {
+        threads: {
+          get: async () => ({ environmentId: null }),
+          storageLocation: async () => ({ hostId: "host_devbox", storageRootPath: "/storage/thread" }),
+        },
+      },
+    });
+    await plugin(bb);
+    await expect(harness.behavior.callRpc("vscode_server_url", { threadId: "thread_storage" }))
+      .resolves.toMatchObject({
+        url: withWorkspaceFolder("https://devbox.example.ts.net:8443", "/storage/thread"), profile: null,
+      });
+  });
+
+  it("routes a pathless environment to the machine owning its storage folder", async () => {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "vscode-server",
+      settings: { machineServerUrls: JSON.stringify({ host_storage: "https://storage.example.ts.net" }) },
+      sdk: {
+        environments: { get: async () => ({ hostId: "host_workspace", path: null }) },
+        threads: {
+          get: async () => ({ environmentId: "env_pathless" }),
+          storageLocation: async () => ({ hostId: "host_storage", storageRootPath: "/storage/thread" }),
+        },
+      },
+    });
+    await plugin(bb);
+    await expect(harness.behavior.callRpc("vscode_server_url", { threadId: "thread_storage" }))
+      .resolves.toMatchObject({ url: withWorkspaceFolder("https://storage.example.ts.net", "/storage/thread") });
+  });
+
+  it.each(["not json", "[]", '{"host_remote":"file:///work/project"}', '{"host_remote":"https://user:example@example.com"}'])(
+    "rejects invalid machine configuration: %s", async (machineServerUrls) => {
+      const { bb, harness } = createFakePluginHost({ pluginId: "vscode-server" });
+      await plugin(bb);
+      await expect(harness.behavior.setSettings({ machineServerUrls })).rejects.toThrow();
+    },
+  );
+
   it("normalizes a configured server URL before exposing it to the panel", async () => {
     const { bb, harness } = createFakePluginHost({
       pluginId: "vscode-server",

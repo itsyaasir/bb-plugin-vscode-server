@@ -15,7 +15,7 @@ const profileImportStatusSchema = z.object({
 
 const configuredUrlSchema = z.object({
   url: z.string().url().nullable(),
-  profile: profileImportStatusSchema,
+  profile: profileImportStatusSchema.nullable(),
 });
 
 type ProfileImportStatus = z.infer<typeof profileImportStatusSchema>;
@@ -56,6 +56,21 @@ function normalizeServerUrl(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function parseMachineServerUrls(value: string): Record<string, string> {
+  if (value.trim() === "") return {};
+  let entries: Record<string, string>;
+  try {
+    entries = z.record(z.string().min(1), z.string()).parse(JSON.parse(value));
+  } catch {
+    throw new Error("Editor URLs by machine must be a JSON object mapping machine IDs to HTTP(S) URLs.");
+  }
+  return Object.fromEntries(Object.entries(entries).map(([hostId, value]) => {
+    const url = normalizeServerUrl(value);
+    if (url === null) throw new Error(`Invalid editor URL for machine ${hostId}. Use an HTTP(S) URL without embedded credentials.`);
+    return [hostId, url];
+  }));
 }
 
 export function withWorkspaceFolder(serverUrl: string, workspacePath: string): string {
@@ -167,6 +182,19 @@ export default async function plugin(bb: BbPluginApi) {
         "The http(s) URL of code-server or VS Code Server. Saving a local URL imports the configured desktop profile. Overrides VSCODE_SERVER_URL.",
       default: "",
     },
+    machineServerUrls: {
+      type: "string",
+      label: "Editor URLs by machine",
+      description: "JSON mapping BB machine IDs to browser-reachable editor URLs. When configured, each thread uses its machine's URL; missing machines show an error instead of falling back to another computer.",
+      experimental_multiline: true,
+      experimental_schema: z.string().superRefine((value, context) => {
+        try { parseMachineServerUrls(value); }
+        catch (cause) {
+          context.addIssue({ code: "custom", message: cause instanceof Error ? cause.message : String(cause) });
+        }
+      }),
+      default: "",
+    },
     autoCaptureLocalServer: {
       type: "boolean",
       label: "Capture local server",
@@ -210,19 +238,32 @@ export default async function plugin(bb: BbPluginApi) {
     );
   };
   const getResponse = async (threadId: string | null) => {
-    const { serverUrl } = await settings.get();
+    const { serverUrl, machineServerUrls } = await settings.get();
     const url = normalizeServerUrl(serverUrl) ?? normalizeServerUrl(process.env.VSCODE_SERVER_URL ?? "");
+    const machineUrls = parseMachineServerUrls(machineServerUrls);
+    const useMachineUrls = Object.keys(machineUrls).length > 0;
     const profile = await getProfile();
     const storedProfile = await bb.storage.kv.get<ProfileImportStatus>("profile-import");
-    if (url === null || threadId === null) return { url, profile: storedProfile ?? profile };
+    if (threadId === null || (url === null && !useMachineUrls)) return { url, profile: storedProfile ?? profile };
 
     const thread = await bb.sdk.threads.get({ threadId });
-    const workspacePath =
-      thread.environmentId === null
-        ? (await bb.sdk.threads.storageLocation({ threadId })).storageRootPath
-        : (await bb.sdk.environments.get({ environmentId: thread.environmentId })).path ??
-          (await bb.sdk.threads.storageLocation({ threadId })).storageRootPath;
-    return { url: withWorkspaceFolder(url, workspacePath), profile: storedProfile ?? profile };
+    const environment = thread.environmentId === null
+      ? null
+      : await bb.sdk.environments.get({ environmentId: thread.environmentId });
+    const workspace = environment?.path != null
+      ? { hostId: environment.hostId, path: environment.path }
+      : await bb.sdk.threads.storageLocation({ threadId }).then((storage) => ({
+          hostId: storage.hostId, path: storage.storageRootPath,
+        }));
+    if (useMachineUrls) {
+      if (workspace.hostId === null || !Object.hasOwn(machineUrls, workspace.hostId)) {
+        throw new Error(`No editor URL configured for machine ${workspace.hostId ?? "unknown"}. Add it in Editor URLs by machine.`);
+      }
+      // These editors own their profiles on their execution machines. The BB
+      // server's local profile-import status does not describe them.
+      return { url: withWorkspaceFolder(machineUrls[workspace.hostId], workspace.path), profile: null };
+    }
+    return { url: url === null ? null : withWorkspaceFolder(url, workspace.path), profile: storedProfile ?? profile };
   };
   let activeImport: Promise<ProfileImportStatus> | null = null;
   let activeImportKey: string | null = null;
@@ -252,6 +293,7 @@ export default async function plugin(bb: BbPluginApi) {
     await bb.storage.kv.delete("profile-import");
     await settings.experimental_set({
       serverUrl: "",
+      machineServerUrls: "",
       sourceUserDataDirectory: "",
       sourceExtensionsDirectory: "",
       targetUserDataDirectory: "",

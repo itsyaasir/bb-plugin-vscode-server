@@ -32,6 +32,31 @@ The plugin settings also show the desktop VS Code profile and extension director
 
 In any thread, open the right panel, choose **Open new tab**, then select **VS Code**. A thread has one VS Code panel; reopening it focuses that panel. The panel opens code-server at the thread environment’s workspace; threads without an environment open at their BB thread-storage folder. Its compact header expands when clicked to reveal the server URL, profile import status, and **Open in Browser**. It reloads its configuration when opened; use **Reload configuration** after changing the setting while it is already open. In the plugin settings, turn on **Capture local server** to restore the standard VS Code profile paths, then detect code-server or VS Code Server on ports 8080 and 8000 and save the first healthy endpoint. Turn the switch off to clear every plugin setting. Turn it back on to restore the paths and capture again. When no URL is configured, **Detect local server** in the panel performs the same capture. **Open in Browser** delegates the URL to BB's native Browser, whose tabs remain available across thread navigation.
 
+## Editors on multiple machines
+
+Run an editor on each execution machine, then configure **Editor URLs by machine**
+with a JSON object keyed by the IDs from `bb machine list --json`, for example:
+
+```json
+{
+  "host_m4": "http://127.0.0.1:8000",
+  "host_devbox": "https://devbox.example.ts.net:8443"
+}
+```
+
+The plugin selects the URL using the thread workspace's machine, then supplies
+that workspace's folder. Threads without an environment use their thread-storage
+machine and folder. With a nonempty mapping, an unconfigured machine shows an
+error; it never silently opens the same path on another computer. URLs must be
+reachable from the browser displaying BB: loopback works only on the computer
+running that editor. Keep remote editors behind private network access and their
+appropriate authentication controls.
+
+Each editor manages its own profile; BB's local profile import is not used for
+machine-mapped editors. An empty mapping retains the existing single-server
+behavior. The new-thread panel continues to use the global server URL until a
+thread has a workspace.
+
 ## Editor session retention
 
 VS Code stays loaded when switching to another right-panel tab, hiding the

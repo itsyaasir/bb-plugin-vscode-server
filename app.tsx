@@ -16,7 +16,7 @@ type ProfileImportStatus = {
 type UrlState =
   | { kind: "loading" }
   | { kind: "detecting" }
-  | { kind: "ready"; url: string; profile: ProfileImportStatus }
+  | { kind: "ready"; url: string; profile: ProfileImportStatus | null }
   | { kind: "missing" }
   | { kind: "error"; message: string };
 
@@ -82,13 +82,13 @@ function VsCodeServerContent({ threadId }: { threadId: string | null }) {
             <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2">
               <div className="min-w-0">
                 <p className="truncate text-sm text-muted-foreground">{state.url}</p>
-                <p className={state.profile.error === null ? "truncate text-xs text-muted-foreground" : "truncate text-xs text-destructive"}>
+                {state.profile === null ? null : <p className={state.profile.error === null ? "truncate text-xs text-muted-foreground" : "truncate text-xs text-destructive"}>
                   {state.profile.error === null
                     ? state.profile.importedAt === null
                       ? `Profile: ${state.profile.targetUserDataDirectory}`
                       : `Profile imported ${new Date(state.profile.importedAt).toLocaleString()}`
                     : state.profile.error}
-                </p>
+                </p>}
               </div>
               <button
                 type="button"
